@@ -1,0 +1,25 @@
+# Compilación de iOS en la nube (Codemagic), sin necesidad de Mac.
+# El IPA sin firmar se instala en el iPhone con Sideloadly (Windows) y un
+# Apple ID gratuito; la app caduca a los 7 días y hay que reinstalarla.
+workflows:
+  ios-sin-firma:
+    name: iOS - IPA sin firmar (para Sideloadly)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Dependencias
+        script: flutter pub get
+      - name: Compilar iOS sin firma
+        script: flutter build ios --release --no-codesign
+      - name: Empaquetar IPA
+        script: |
+          rm -rf Payload facturas.ipa
+          mkdir Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qr facturas.ipa Payload
+    artifacts:
+      - facturas.ipa

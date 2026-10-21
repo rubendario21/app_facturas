@@ -1,0 +1,4 @@
+# Los tests de base de datos comparten el mismo archivo SQLite.
+concurrency: 1
+tags:
+  servidor:

@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Vista iPhone (Windows)",
+      "request": "launch",
+      "type": "dart",
+      "deviceId": "windows",
+      "args": ["--dart-define=PREVIEW=ios"]
+    },
+    {
+      "name": "Vista Android (Windows)",
+      "request": "launch",
+      "type": "dart",
+      "deviceId": "windows",
+      "args": ["--dart-define=PREVIEW=android"]
+    },
+    {
+      "name": "Windows (sin marco)",
+      "request": "launch",
+      "type": "dart",
+      "deviceId": "windows"
+    }
+  ]
+}
