@@ -116,16 +116,13 @@ En VS Code, estas tres opciones están en *Run and Debug*.
 ## Generar el APK
 
 ```powershell
-flutter build apk --release --split-per-abi
+flutter build apk --release
 ```
 
-Los archivos quedan en `build/app/outputs/flutter-apk/`:
+Se genera **un único APK universal** en `build/app/outputs/flutter-apk/app-release.apk` (unos 64 MB). Incluye las versiones de 32 y 64 bits y se instala en cualquier teléfono Android 7.0 o superior.
 
-| Archivo | Para |
-|---|---|
-| `app-arm64-v8a-release.apk` | Casi todos los móviles actuales: **es el que se reparte** |
-| `app-armeabi-v7a-release.apk` | Móviles antiguos o muy económicos |
-| `app-x86_64-release.apk` | Emuladores y algunas tablets Intel |
+> [!WARNING]
+> **No repartas APK separados por procesador** (`--split-per-abi`). Muchos móviles económicos, como el Samsung Galaxy A04, traen Android de **32 bits** aunque su procesador sea de 64, y rechazan el APK `arm64-v8a` con el mensaje *"no es compatible con el teléfono"*. El APK `x86_64` solo sirve para emuladores. Además, los APK separados usan otra numeración interna de versión (1002, 2002…), y mezclarlos con el universal impide actualizar.
 
 Antes de cada entrega:
 
