@@ -77,6 +77,11 @@ void main() {
     expect(await db.query('outbox'), isEmpty);
     // El login local ya no existe.
     expect(await db.query('sqlite_master', where: "name = 'users'"), isEmpty);
+    // Campos de anulación (versión 5).
+    final columns = (await db.rawQuery('PRAGMA table_info(payments)')).map((c) => c['name']);
+    expect(columns, containsAll(['voided_at', 'void_reason']));
+    expect(paid.isVoided, isFalse);
+
     // Las claves foráneas vuelven a estar activas tras migrar.
     expect((await db.rawQuery('PRAGMA foreign_keys')).first.values.first, 1);
 

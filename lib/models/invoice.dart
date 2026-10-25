@@ -45,6 +45,10 @@ class Payment {
   /// Número de recibo (RC-0001). Lo asigna el servidor al sincronizar.
   final String? receiptNumber;
 
+  /// Anulado: se conserva en el historial pero no cuenta en el saldo.
+  final DateTime? voidedAt;
+  final String voidReason;
+
   const Payment({
     this.id,
     this.uuid,
@@ -53,7 +57,11 @@ class Payment {
     this.method = '',
     this.note = '',
     this.receiptNumber,
+    this.voidedAt,
+    this.voidReason = '',
   });
+
+  bool get isVoided => voidedAt != null;
 
   static const methods = ['Efectivo', 'Transferencia', 'Tarjeta', 'Otro'];
 
@@ -68,6 +76,8 @@ class Payment {
         method: m['method'] as String? ?? '',
         note: m['note'] as String? ?? '',
         receiptNumber: m['receipt_number'] as String?,
+        voidedAt: m['voided_at'] == null ? null : DateTime.parse(m['voided_at'] as String),
+        voidReason: m['void_reason'] as String? ?? '',
       );
 }
 
@@ -93,7 +103,13 @@ class Invoice {
   final bool paid;
   final DateTime? paidDate;
   final List<InvoiceItem> items;
+
+  /// Todos los pagos, también los anulados (para el historial).
   final List<Payment> payments;
+
+  /// Anulada: se conserva en el historial con el motivo; no cuenta como deuda.
+  final DateTime? voidedAt;
+  final String voidReason;
 
   const Invoice({
     this.id,
@@ -111,7 +127,14 @@ class Invoice {
     this.paidDate,
     this.items = const [],
     this.payments = const [],
+    this.voidedAt,
+    this.voidReason = '',
   });
+
+  bool get isVoided => voidedAt != null;
+
+  /// Pagos vigentes (sin los anulados).
+  List<Payment> get activePayments => payments.where((p) => !p.isVoided).toList();
 
   bool get isDraft => number == null;
   String get displayNumber => number ?? 'Borrador';
@@ -120,7 +143,7 @@ class Invoice {
   double get taxAmount => subtotal * taxRate / 100;
   double get total => subtotal + taxAmount;
 
-  double get paidAmount => payments.fold(0, (sum, p) => sum + p.amount);
+  double get paidAmount => activePayments.fold(0, (sum, p) => sum + p.amount);
 
   /// Saldo pendiente (nunca negativo).
   double get balance {
@@ -128,14 +151,18 @@ class Invoice {
     return cents > 0 ? cents / 100 : 0;
   }
 
-  bool get hasPayments => payments.isNotEmpty;
-  bool get isPartiallyPaid => !paid && hasPayments;
+  /// ¿Tiene pagos vigentes? (los anulados no cuentan)
+  bool get hasPayments => activePayments.isNotEmpty;
+  bool get isPartiallyPaid => !paid && !isVoided && hasPayments;
 
-  /// Solo se edita/elimina si no tiene ningún pago registrado.
-  bool get isEditable => !paid && !hasPayments;
+  /// Solo se edita si no está anulada ni tiene pagos vigentes.
+  bool get isEditable => !isVoided && !paid && !hasPayments;
+
+  /// Pendiente de cobro (cuenta en "Por cobrar").
+  bool get isOpen => !paid && !isVoided;
 
   bool get isOverdue {
-    if (paid || dueDate == null) return false;
+    if (paid || isVoided || dueDate == null) return false;
     final now = DateTime.now();
     return dueDate!.isBefore(DateTime(now.year, now.month, now.day));
   }
@@ -158,6 +185,8 @@ class Invoice {
         paidDate: _parseDate(m['paid_date']),
         items: items,
         payments: payments,
+        voidedAt: _parseDate(m['voided_at']),
+        voidReason: m['void_reason'] as String? ?? '',
       );
 
   /// Campos que se pueden modificar mientras la factura no tiene pagos.

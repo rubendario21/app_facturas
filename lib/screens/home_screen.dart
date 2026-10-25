@@ -17,7 +17,7 @@ import 'issuer_settings_screen.dart';
 import 'login_screen.dart';
 import 'profile_screen.dart';
 
-enum _Filter { all, pending, overdue, paid }
+enum _Filter { all, pending, overdue, paid, voided }
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -135,9 +135,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   bool _matches(Invoice i) => switch (_filter) {
         _Filter.all => true,
-        _Filter.pending => !i.paid,
+        _Filter.pending => i.isOpen,
         _Filter.overdue => i.isOverdue,
         _Filter.paid => i.paid,
+        _Filter.voided => i.isVoided,
       };
 
   @override
@@ -236,6 +237,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 ButtonSegment(
                                     value: _Filter.paid,
                                     label: Text('Pagadas')),
+                                ButtonSegment(
+                                    value: _Filter.voided,
+                                    label: Text('Anuladas')),
                               ],
                               selected: {_filter},
                               onSelectionChanged: (s) =>
@@ -295,13 +299,13 @@ class _Summary extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final c = AppColors.of(context);
-    final open = invoices.where((i) => !i.paid);
+    final open = invoices.where((i) => i.isOpen);
     final receivable = open.fold<double>(0, (s, i) => s + i.balance);
     final overdue =
         open.where((i) => i.isOverdue).fold<double>(0, (s, i) => s + i.balance);
     final now = DateTime.now();
     final collected = invoices
-        .expand((i) => i.payments)
+        .expand((i) => i.activePayments)
         .where((p) => p.date.year == now.year && p.date.month == now.month)
         .fold<double>(0, (s, p) => s + p.amount);
 
@@ -423,7 +427,9 @@ class _InvoiceRow extends StatelessWidget {
                         currency),
                     style: theme.textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w600,
-                        fontFeatures: AppTheme.tabular)),
+                        fontFeatures: AppTheme.tabular,
+                        color: inv.isVoided ? c.muted : null,
+                        decoration: inv.isVoided ? TextDecoration.lineThrough : null)),
                 const SizedBox(height: 4),
                 StatusChip(invoice: inv, dense: true),
               ],

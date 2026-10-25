@@ -34,6 +34,29 @@ void main() {
     }
   });
 
+  test('genera la factura y el recibo anulados', () async {
+    final voided = Invoice(
+      id: 2,
+      number: 'F-0002',
+      issueDate: DateTime(2026, 10, 1),
+      clientName: 'Cliente',
+      taxRate: 0,
+      items: const [InvoiceItem(description: 'X', quantity: 1, unitPrice: 10)],
+      voidedAt: DateTime(2026, 10, 3),
+      voidReason: 'Duplicada',
+      payments: [
+        Payment(id: 9, receiptNumber: 'RC-0009', amount: 10, date: DateTime(2026, 10, 2),
+            voidedAt: DateTime(2026, 10, 3), voidReason: 'Duplicada'),
+      ],
+    );
+    for (final bytes in [
+      await PdfService.build(voided, issuer),
+      await PdfService.buildReceipt(voided, voided.payments.single, issuer),
+    ]) {
+      expect(latin1.decode(bytes.sublist(0, 4)), '%PDF');
+    }
+  });
+
   test('número y nombre de archivo del recibo', () {
     expect(invoice.payments.last.receiptNumber, 'RC-0007');
     expect(PdfService.receiptFileName(invoice.payments.last), 'recibo_RC-0007.pdf');

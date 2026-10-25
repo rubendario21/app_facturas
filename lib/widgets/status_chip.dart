@@ -12,7 +12,9 @@ class StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = AppColors.of(context);
-    final (label, color) = invoice.paid
+    final (label, color) = invoice.isVoided
+        ? ('Anulada', c.muted)
+        : invoice.paid
         ? ('Pagada', c.paid)
         : invoice.isOverdue
             ? ('Vencida', c.overdue)

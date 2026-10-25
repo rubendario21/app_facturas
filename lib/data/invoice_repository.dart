@@ -30,8 +30,8 @@ class InvoiceRepository {
   Future<Database> get _db => (_helper ?? DatabaseHelper.instance).database;
 
   /// Condición SQL: la factura no está pagada ni tiene abonos.
-  static const _editable =
-      'paid = 0 AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.invoice_id = invoices.id)';
+  static const _editable = 'paid = 0 AND voided_at IS NULL AND NOT EXISTS '
+      '(SELECT 1 FROM payments p WHERE p.invoice_id = invoices.id AND p.voided_at IS NULL)';
 
   Future<List<Invoice>> list() async {
     final db = await _db;
@@ -207,6 +207,69 @@ class InvoiceRepository {
     Outbox.notifyChanged();
   }
 
+  /// Motivo de anulación válido (el servidor exige lo mismo).
+  static String checkVoidReason(String reason) {
+    final r = reason.trim();
+    if (r.length < 3) {
+      throw PaymentException('Escribe el motivo de la anulación (al menos 3 caracteres).');
+    }
+    return r.length > 255 ? r.substring(0, 255) : r;
+  }
+
+  /// Anula la factura y todos sus pagos vigentes. Se conservan en el
+  /// historial con el motivo (solo administradores; el servidor lo comprueba).
+  Future<void> voidInvoice(int invoiceId, String reason) async {
+    final r = checkVoidReason(reason);
+    final db = await _db;
+    await db.transaction((txn) async {
+      final invoice = await _get(txn, invoiceId);
+      if (invoice == null || invoice.isVoided) return;
+      final now = DateTime.now().toIso8601String();
+      await txn.update(
+        'invoices',
+        {'voided_at': now, 'void_reason': r, 'paid': 0, 'paid_date': null},
+        where: 'id = ?',
+        whereArgs: [invoiceId],
+      );
+      var paymentReason = 'Anulación de la factura ${invoice.displayNumber}: $r';
+      if (paymentReason.length > 255) paymentReason = paymentReason.substring(0, 255);
+      await txn.update('payments', {'voided_at': now, 'void_reason': paymentReason},
+          where: 'invoice_id = ? AND voided_at IS NULL', whereArgs: [invoiceId]);
+      await Outbox.add(txn, 'invoice_void', invoice.uuid!, {'id': invoice.uuid, 'reason': r},
+          invoiceUuid: invoice.uuid);
+    });
+    Outbox.notifyChanged();
+  }
+
+  /// Anula un pago: deja de contar y el saldo vuelve a subir. Si el pago aún
+  /// no había llegado al servidor, simplemente se quita.
+  Future<void> voidPayment(int invoiceId, int paymentId, String reason) async {
+    final r = checkVoidReason(reason);
+    final db = await _db;
+    await db.transaction((txn) async {
+      final row = (await txn.query('payments',
+              where: 'id = ? AND invoice_id = ?', whereArgs: [paymentId, invoiceId]))
+          .firstOrNull;
+      if (row == null || row['voided_at'] != null) return;
+      final uuid = row['uuid'] as String;
+      if (row['server_rev'] == null && await Outbox.hasPending(txn, uuid)) {
+        await txn.delete('payments', where: 'id = ?', whereArgs: [paymentId]);
+        await txn.delete('outbox', where: 'entity_uuid = ?', whereArgs: [uuid]);
+      } else {
+        await txn.update(
+          'payments',
+          {'voided_at': DateTime.now().toIso8601String(), 'void_reason': r},
+          where: 'id = ?',
+          whereArgs: [paymentId],
+        );
+        await Outbox.add(txn, 'payment_void', uuid, {'id': uuid, 'reason': r},
+            invoiceUuid: await _uuidOf(txn, invoiceId));
+      }
+      await syncPaidStatus(txn, invoiceId);
+    });
+    Outbox.notifyChanged();
+  }
+
   // ------------------------------------------------- datos del servidor
 
   /// Aplica una factura recibida del servidor (alta, cambio o borrado).
@@ -215,7 +278,7 @@ class InvoiceRepository {
       DatabaseExecutor db, Map<String, Object?> j) async {
     final uuid = j['id'] as String;
     if (await Outbox.hasPending(db, uuid,
-        types: ['invoice_upsert', 'invoice_delete'])) {
+        types: ['invoice_upsert', 'invoice_delete', 'invoice_void'])) {
       return;
     }
     final local =
@@ -238,6 +301,8 @@ class InvoiceRepository {
       'client_email': j['client_email'],
       'tax_rate': (j['tax_rate'] as num).toDouble(),
       'notes': j['notes'],
+      'voided_at': _serverDateTime(j['voided_at']),
+      'void_reason': j['void_reason'],
       'server_rev': j['rev'],
     };
     final int id;
@@ -292,6 +357,8 @@ class InvoiceRepository {
       'date': _serverDate(j['date'])!.toIso8601String(),
       'method': j['method'],
       'note': j['note'],
+      'voided_at': _serverDateTime(j['voided_at']),
+      'void_reason': j['void_reason'],
       'server_rev': j['rev'],
     };
     if (local == null) {
@@ -309,9 +376,10 @@ class InvoiceRepository {
   static Future<void> syncPaidStatus(DatabaseExecutor db, int invoiceId) async {
     final invoice = await _get(db, invoiceId);
     if (invoice == null) return;
-    final fullyPaid = invoice.hasPayments &&
+    final fullyPaid = !invoice.isVoided &&
+        invoice.hasPayments &&
         toCents(invoice.paidAmount) >= toCents(invoice.total);
-    final lastDate = invoice.payments
+    final lastDate = invoice.activePayments
         .map((p) => dateOnly(p.date))
         .fold<DateTime?>(null, (a, b) => a == null || b.isAfter(a) ? b : a);
     await db.update(
@@ -410,6 +478,10 @@ class InvoiceRepository {
         'notes': invoice.notes,
         'items': [for (final i in invoice.items) i.toJson()],
       };
+
+  /// Fecha y hora del servidor ("2026-10-24 22:07:37") en formato ISO.
+  static String? _serverDateTime(Object? v) =>
+      v == null ? null : DateTime.parse(v as String).toIso8601String();
 
   static DateTime? _serverDate(Object? v) =>
       v == null ? null : dateOnly(DateTime.parse(v as String));

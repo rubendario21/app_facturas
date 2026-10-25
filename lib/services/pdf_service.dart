@@ -52,6 +52,10 @@ class PdfService {
             ],
           ),
           pw.SizedBox(height: 24),
+          if (inv.isVoided) ...[
+            _voidBanner('Factura anulada el ${fmtDate(inv.voidedAt!)}', inv.voidReason),
+            pw.SizedBox(height: 16),
+          ],
           _clientBlock(inv),
           pw.SizedBox(height: 20),
           pw.TableHelper.fromTextArray(
@@ -103,7 +107,7 @@ class PdfService {
                     'IVA (${fmtQty(inv.taxRate)} %)', money(inv.taxAmount)),
                 pw.Divider(color: _accent),
                 _totalRow('TOTAL', money(inv.total), big: true),
-                if (inv.hasPayments) ...[
+                if (inv.hasPayments && !inv.isVoided) ...[
                   pw.SizedBox(height: 6),
                   _totalRow('Pagado', money(inv.paidAmount)),
                   _totalRow('Saldo pendiente', money(inv.balance), big: true),
@@ -138,6 +142,7 @@ class PdfService {
     final index = inv.payments.indexWhere((p) => p.id == payment.id);
     final previousCents = inv.payments
         .take(index < 0 ? 0 : index)
+        .where((p) => !p.isVoided)
         .fold<int>(0, (s, p) => s + toCents(p.amount));
     final totalCents = toCents(inv.total);
     final afterCents = previousCents + toCents(payment.amount);
@@ -180,6 +185,10 @@ class PdfService {
                     pw.Text('Nº ${payment.receiptNumber ?? "pendiente"}',
                         style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
                     pw.Text('Fecha: ${fmtDate(payment.date)}'),
+                    if (payment.isVoided) ...[
+                      pw.SizedBox(height: 8),
+                      _stamp('ANULADO', _void),
+                    ],
                   ],
                 ),
               ],
@@ -228,7 +237,10 @@ class PdfService {
                 ]),
               ),
             ),
-            if (settles) ...[
+            if (payment.isVoided) ...[
+              pw.SizedBox(height: 12),
+              _voidBanner('Recibo anulado el ${fmtDate(payment.voidedAt!)}', payment.voidReason),
+            ] else if (settles) ...[
               pw.SizedBox(height: 12),
               pw.Align(
                 alignment: pw.Alignment.centerRight,
@@ -313,6 +325,36 @@ class PdfService {
         ],
       );
 
+  static final _void = PdfColor.fromHex('#C2412D');
+
+  static pw.Widget _stamp(String text, PdfColor color) => pw.Container(
+        padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: pw.BoxDecoration(
+          border: pw.Border.all(color: color, width: 2),
+          borderRadius: pw.BorderRadius.circular(4),
+        ),
+        child: pw.Text(text, style: pw.TextStyle(color: color, fontWeight: pw.FontWeight.bold)),
+      );
+
+  /// Franja con la fecha y el motivo de la anulación.
+  static pw.Widget _voidBanner(String title, String reason) => pw.Container(
+        width: double.infinity,
+        padding: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: pw.BoxDecoration(
+          color: PdfColor.fromHex('#FBEDEA'),
+          border: pw.Border.all(color: _void, width: 1.5),
+          borderRadius: pw.BorderRadius.circular(6),
+        ),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(title, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: _void)),
+            pw.SizedBox(height: 2),
+            pw.Text('Motivo: $reason'),
+          ],
+        ),
+      );
+
   static pw.Widget _headerBlock(Invoice inv) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.end,
         children: [
@@ -327,7 +369,10 @@ class PdfService {
           pw.Text('Fecha: ${fmtDate(inv.issueDate)}'),
           if (inv.dueDate != null)
             pw.Text('Vencimiento: ${fmtDate(inv.dueDate!)}'),
-          if (inv.paid) ...[
+          if (inv.isVoided) ...[
+            pw.SizedBox(height: 8),
+            _stamp('ANULADA', _void),
+          ] else if (inv.paid) ...[
             pw.SizedBox(height: 8),
             pw.Container(
               padding:

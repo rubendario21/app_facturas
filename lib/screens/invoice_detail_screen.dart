@@ -8,6 +8,7 @@ import '../models/issuer.dart';
 import '../services/auth_service.dart';
 import '../services/pdf_service.dart';
 import '../services/sync_service.dart';
+import '../theme/app_theme.dart';
 import '../utils/format.dart';
 import '../widgets/payment_dialog.dart';
 import '../widgets/status_chip.dart';
@@ -153,15 +154,104 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     ));
   }
 
-  Future<void> _deletePayment(Payment p) async {
+  /// Un pago que aún no llegó al servidor se puede quitar sin más.
+  Future<void> _removePendingPayment(Payment p) async {
     final ok = await _confirm(
-      'Eliminar pago',
-      '¿Eliminar el pago de ${_money(p.amount)} del ${fmtDate(p.date)}? '
-          'El saldo pendiente aumentará en ese importe.',
-      'Eliminar',
+      'Quitar pago',
+      'Este pago de ${_money(p.amount)} aún no se ha enviado al servidor. '
+          '¿Quitarlo? El saldo pendiente aumentará en ese importe.',
+      'Quitar',
     );
     if (!ok) return;
     await _repo.deletePayment(_invoice!.id!, p.id!);
+    _load();
+  }
+
+  /// Pide el motivo de una anulación (obligatorio).
+  Future<String?> _askReason(String title, String explanation, String action) {
+    final controller = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(explanation),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: controller,
+                autofocus: true,
+                maxLength: 255,
+                maxLines: 3,
+                minLines: 2,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  labelText: 'Motivo de la anulación',
+                  hintText: 'Ej.: el cliente canceló el servicio',
+                ),
+                validator: (v) => (v == null || v.trim().length < 3)
+                    ? 'Escribe el motivo (al menos 3 caracteres)'
+                    : null,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error),
+            onPressed: () {
+              if (formKey.currentState!.validate()) Navigator.pop(ctx, controller.text.trim());
+            },
+            child: Text(action),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _voidPayment(Payment p) async {
+    final reason = await _askReason(
+      'Anular pago',
+      'El pago ${p.receiptNumber} de ${_money(p.amount)} quedará anulado en el historial '
+          'y el saldo de la factura aumentará en ese importe.',
+      'Anular pago',
+    );
+    if (reason == null) return;
+    try {
+      await _repo.voidPayment(_invoice!.id!, p.id!, reason);
+    } on PaymentException catch (e) {
+      _showMessage(e.toString());
+      return;
+    }
+    _showMessage('Pago anulado. Se enviará al servidor al sincronizar.');
+    _load();
+  }
+
+  Future<void> _voidInvoice() async {
+    final inv = _invoice!;
+    final active = inv.activePayments.length;
+    final reason = await _askReason(
+      'Anular factura ${inv.displayNumber}',
+      active == 0
+          ? 'La factura quedará anulada en el historial con el motivo y su número no se reutiliza.'
+          : 'La factura y sus $active pago(s) quedarán anulados en el historial con el motivo. '
+              'Su número no se reutiliza.',
+      'Anular factura',
+    );
+    if (reason == null) return;
+    try {
+      await _repo.voidInvoice(inv.id!, reason);
+    } on PaymentException catch (e) {
+      _showMessage(e.toString());
+      return;
+    }
+    _showMessage('Factura anulada. Se enviará al servidor al sincronizar.');
     _load();
   }
 
@@ -207,16 +297,28 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
       appBar: AppBar(
         title: Text('Factura ${inv.displayNumber}'),
         actions: [
-          if (inv.isEditable) ...[
+          if (inv.isEditable)
+            IconButton(tooltip: 'Editar', icon: const Icon(Icons.edit), onPressed: _edit),
+          // Un borrador aún sin número se puede eliminar; una factura
+          // numerada se anula (queda en el historial).
+          if (inv.isDraft && inv.isEditable)
             IconButton(
-                tooltip: 'Editar',
-                icon: const Icon(Icons.edit),
-                onPressed: _edit),
-            IconButton(
-                tooltip: 'Eliminar',
+                tooltip: 'Eliminar borrador',
                 icon: const Icon(Icons.delete_outline),
                 onPressed: _delete),
-          ],
+          if (!inv.isDraft && !inv.isVoided && AuthService.instance.isAdmin)
+            PopupMenuButton<String>(
+              onSelected: (_) => _voidInvoice(),
+              itemBuilder: (_) => [
+                PopupMenuItem(
+                  value: 'void',
+                  child: ListTile(
+                    leading: Icon(Icons.block, color: theme.colorScheme.error),
+                    title: Text('Anular factura', style: TextStyle(color: theme.colorScheme.error)),
+                  ),
+                ),
+              ],
+            ),
         ],
       ),
       body: ListView(
@@ -241,7 +343,23 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                         'El PDF estará disponible entonces.'),
               ),
             ),
-          if (!inv.isEditable)
+          if (inv.isVoided)
+            Card(
+              margin: const EdgeInsets.only(top: 12),
+              color: theme.colorScheme.errorContainer,
+              child: ListTile(
+                leading: Icon(Icons.block, color: theme.colorScheme.onErrorContainer),
+                title: Text('Factura anulada',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w600, color: theme.colorScheme.onErrorContainer)),
+                subtitle: Text(
+                  'Motivo: ${inv.voidReason}\n'
+                  'Anulada el ${fmtDate(inv.voidedAt!)}. Sus pagos también quedaron anulados.',
+                  style: TextStyle(color: theme.colorScheme.onErrorContainer),
+                ),
+              ),
+            ),
+          if (!inv.isEditable && !inv.isVoided)
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Row(children: [
@@ -249,11 +367,13 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    inv.paid
-                        ? 'Pagada el ${inv.paidDate != null ? fmtDate(inv.paidDate!) : '-'}. '
-                            'Las facturas con pagos no se pueden editar.'
-                        : 'Tiene abonos registrados, por eso no se puede editar. '
-                            'Para corregirla, elimina antes los pagos.',
+                    (inv.paid
+                            ? 'Pagada el ${inv.paidDate != null ? fmtDate(inv.paidDate!) : '-'}. '
+                                'Las facturas con pagos no se pueden editar.'
+                            : 'Tiene abonos registrados, por eso no se puede editar.') +
+                        (AuthService.instance.isAdmin
+                            ? ' Si hay un error, anula el pago o la factura indicando el motivo.'
+                            : ''),
                     style: theme.textTheme.bodySmall,
                   ),
                 ),
@@ -325,7 +445,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          if (!inv.paid)
+          if (!inv.paid && !inv.isVoided)
             FilledButton.icon(
               style: FilledButton.styleFrom(
                   minimumSize: const Size.fromHeight(48),
@@ -364,21 +484,24 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     final theme = Theme.of(context);
     final progress =
         inv.total > 0 ? (inv.paidAmount / inv.total).clamp(0.0, 1.0) : 0.0;
+    final muted = AppColors.of(context).muted;
     return _section('Pagos', [
-      _totalLine('Total factura', _money(inv.total)),
-      _totalLine('Pagado', _money(inv.paidAmount)),
-      _totalLine('Saldo pendiente', _money(inv.balance), bold: true),
-      const SizedBox(height: 8),
-      ClipRRect(
-        borderRadius: BorderRadius.circular(4),
-        child: LinearProgressIndicator(
-          value: progress,
-          minHeight: 8,
-          color: Colors.green.shade600,
-          backgroundColor: theme.colorScheme.surfaceContainerHighest,
+      if (!inv.isVoided) ...[
+        _totalLine('Total factura', _money(inv.total)),
+        _totalLine('Pagado', _money(inv.paidAmount)),
+        _totalLine('Saldo pendiente', _money(inv.balance), bold: true),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value: progress,
+            minHeight: 8,
+            color: Colors.green.shade600,
+            backgroundColor: theme.colorScheme.surfaceContainerHighest,
+          ),
         ),
-      ),
-      const SizedBox(height: 12),
+        const SizedBox(height: 12),
+      ],
       Text('Historial de pagos', style: theme.textTheme.labelLarge),
       if (inv.payments.isEmpty)
         Padding(
@@ -393,17 +516,23 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
             dense: true,
             leading: CircleAvatar(
               radius: 18,
-              backgroundColor: Colors.green.shade50,
-              child: Icon(Icons.payments_outlined,
-                  size: 18, color: Colors.green.shade700),
+              backgroundColor: p.isVoided ? theme.colorScheme.surfaceContainerHighest : Colors.green.shade50,
+              child: Icon(p.isVoided ? Icons.block : Icons.payments_outlined,
+                  size: 18, color: p.isVoided ? muted : Colors.green.shade700),
             ),
-            title: Text(_money(p.amount),
-                style: const TextStyle(fontWeight: FontWeight.w600)),
+            title: Text(
+                p.isVoided ? '${_money(p.amount)}  (anulado)' : _money(p.amount),
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: p.isVoided ? muted : null,
+                  decoration: p.isVoided ? TextDecoration.lineThrough : null,
+                )),
             subtitle: Text([
               '${p.receiptNumber ?? 'Pendiente de sincronizar'} · ${fmtDate(p.date)}',
               if (p.method.isNotEmpty) p.method,
               if (p.note.isNotEmpty) p.note,
-            ].join(' · ')),
+              if (p.isVoided) '\nAnulado: ${p.voidReason}',
+            ].join(' · ').replaceAll(' · \n', '\n')),
             onTap: () => _openReceipt(p),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
@@ -414,12 +543,18 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                   onPressed: () => _openReceipt(p),
                 ),
                 // Un pago aún no enviado lo puede quitar cualquiera; uno ya
-                // sincronizado, solo un administrador.
-                if (AuthService.instance.isAdmin || p.isPending)
+                // registrado en el servidor solo lo anula un administrador.
+                if (p.isPending && !p.isVoided)
                   IconButton(
-                    tooltip: 'Eliminar pago',
+                    tooltip: 'Quitar pago',
                     icon: const Icon(Icons.delete_outline, size: 20),
-                    onPressed: () => _deletePayment(p),
+                    onPressed: () => _removePendingPayment(p),
+                  )
+                else if (AuthService.instance.isAdmin && !p.isVoided && !inv.isVoided)
+                  IconButton(
+                    tooltip: 'Anular pago',
+                    icon: Icon(Icons.block, size: 20, color: theme.colorScheme.error),
+                    onPressed: () => _voidPayment(p),
                   ),
               ],
             ),

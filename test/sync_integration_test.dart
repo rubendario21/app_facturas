@@ -172,6 +172,41 @@ void main() {
     await a.sync.sync();
     expect((await a.invoices.list()).map((i) => i.number), contains('F-0051'));
 
+    // --- Anulaciones: el admin anula un pago y luego la factura; B lo ve.
+    final toVoid = await a.invoices.create(draft('Cliente a anular', 100));
+    await a.sync.sync();
+    await a.invoices.addPayment(toVoid, Payment(amount: 50, date: DateTime(2026, 10, 6)));
+    await a.invoices.addPayment(toVoid, Payment(amount: 69, date: DateTime(2026, 10, 7)));
+    await a.sync.sync();
+    final number = (await a.invoices.get(toVoid))!.number!;
+    await b.sync.sync();
+    final inB = await b.byNumber(number);
+    expect(inB.paid, isTrue);
+
+    // Un miembro no puede anular: el servidor lo rechaza y se restaura.
+    await b.invoices.voidPayment(inB.id!, inB.payments.last.id!, 'Prueba de miembro');
+    await b.sync.sync();
+    expect(b.sync.takeRejections().single, contains('administrador'));
+    expect((await b.byNumber(number)).payments.every((p) => !p.isVoided), isTrue);
+
+    final payA = (await a.invoices.get(toVoid))!.payments.last;
+    await a.invoices.voidPayment(toVoid, payA.id!, 'Cheque devuelto');
+    await a.sync.sync();
+    await b.sync.sync();
+    final afterPayVoid = await b.byNumber(number);
+    expect(afterPayVoid.paid, isFalse);
+    expect(afterPayVoid.balance, 69);
+    expect(afterPayVoid.payments.last.voidReason, 'Cheque devuelto');
+
+    await a.invoices.voidInvoice(toVoid, 'El cliente canceló el pedido');
+    await a.sync.sync();
+    await b.sync.sync();
+    final afterInvoiceVoid = await b.byNumber(number);
+    expect(afterInvoiceVoid.isVoided, isTrue);
+    expect(afterInvoiceVoid.voidReason, 'El cliente canceló el pedido');
+    expect(afterInvoiceVoid.payments.every((p) => p.isVoided), isTrue);
+    expect(afterInvoiceVoid.payments.last.voidReason, 'Cheque devuelto', reason: 'el ya anulado conserva su motivo');
+
     // --- Varios negocios: el superadmin crea otro y cambia entre ellos.
     final mainId = a.auth.session!.businessId;
     final mainInvoices = (await a.invoices.list()).map((i) => i.number).toSet();

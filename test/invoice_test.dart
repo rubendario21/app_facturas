@@ -73,4 +73,40 @@ void main() {
     expect(fmtMoney(0, r'$'), r'$ 0,00');
     expect(const Issuer().currency, r'$');
   });
+
+  group('anulaciones', () {
+    final inv = Invoice(
+      issueDate: DateTime(2026, 1, 1),
+      dueDate: DateTime(2026, 1, 2),
+      clientName: 'Cliente',
+      taxRate: 0,
+      items: const [InvoiceItem(description: 'A', quantity: 1, unitPrice: 100)],
+      payments: [
+        Payment(amount: 60, date: DateTime(2026, 1, 3)),
+        Payment(amount: 40, date: DateTime(2026, 1, 4), voidedAt: DateTime(2026, 1, 5), voidReason: 'Devuelto'),
+      ],
+    );
+
+    test('un pago anulado no cuenta en lo pagado ni en el saldo', () {
+      expect(inv.paidAmount, 60);
+      expect(inv.balance, 40);
+      expect(inv.activePayments, hasLength(1));
+      expect(inv.payments, hasLength(2), reason: 'el historial conserva el anulado');
+    });
+
+    test('una factura anulada no está pendiente, ni vencida, ni se edita', () {
+      final voided = Invoice(
+        issueDate: DateTime(2026, 1, 1),
+        dueDate: DateTime(2026, 1, 2),
+        clientName: 'C',
+        taxRate: 0,
+        voidedAt: DateTime(2026, 1, 3),
+        voidReason: 'Duplicada',
+      );
+      expect(voided.isVoided, isTrue);
+      expect(voided.isOpen, isFalse);
+      expect(voided.isOverdue, isFalse);
+      expect(voided.isEditable, isFalse);
+    });
+  });
 }

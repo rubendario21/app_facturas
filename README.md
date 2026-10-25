@@ -14,7 +14,7 @@
   <img alt="Dart 3" src="https://img.shields.io/badge/Dart-3-0175C2?logo=dart&logoColor=white">
   <img alt="Android" src="https://img.shields.io/badge/Android-7.0%2B-3DDC84?logo=android&logoColor=white">
   <img alt="Funciona sin conexión" src="https://img.shields.io/badge/sin%20conexi%C3%B3n-s%C3%AD-2E3A8C">
-  <img alt="Versión 1.1.0" src="https://img.shields.io/badge/versi%C3%B3n-1.1.0-2E3A8C">
+  <img alt="Versión 1.2.0" src="https://img.shields.io/badge/versi%C3%B3n-1.2.0-2E3A8C">
 </p>
 
 ---
@@ -36,6 +36,7 @@
 |---|---|
 | **Facturas** | Cliente, fechas, conceptos, IVA y observaciones. Se editan mientras no tengan pagos. |
 | **Abonos y pagos** | Pago total o parcial con historial. La factura queda pagada cuando los pagos cubren el total. |
+| **Anulaciones** | Un administrador puede anular una factura (y con ella todos sus pagos) o un pago concreto, indicando el motivo. Quedan en el historial con el sello *ANULADA* / *ANULADO*. |
 | **PDF** | Factura y recibo de cada pago (`RC-0001`) con el logo del negocio, listos para imprimir o compartir. |
 | **Sin conexión** | Todo se guarda en el móvil. Una factura creada sin señal queda como *borrador* y recibe su número (`F-0001`) al sincronizar. |
 | **Equipo** | Varias personas comparten las mismas facturas. Si dos cobran a la vez y se supera el saldo, el servidor lo impide y la app lo avisa. |

@@ -130,6 +130,88 @@ void main() {
     expect(await repo.countLocalOnly(), 0);
     expect((await queue()).single.data['legacy_number'], 'F-0003');
   });
+
+  group('anulaciones', () {
+    Future<(int, String)> paidInvoice() async {
+      final id = await repo.create(sample());
+      final uuid = (await repo.get(id))!.uuid!;
+      final db = await helper.database;
+      await db.delete('outbox');
+      // Simula lo que ya está en el servidor: número y dos pagos.
+      await InvoiceRepository.applyServerInvoice(db, _serverInvoice(uuid, 'F-0001'));
+      for (final (n, amount) in [(1, 60.0), (2, 59.0)]) {
+        await InvoiceRepository.applyServerPayment(db, {
+          'id': '0000000$n-1111-4111-8111-111111111111',
+          'invoice_id': uuid,
+          'receipt_number': 'RC-000$n',
+          'amount': amount,
+          'date': '2026-10-0$n',
+          'method': 'Efectivo',
+          'note': '',
+          'deleted': false,
+          'voided': false,
+          'rev': 4 + n,
+        });
+      }
+      return (id, uuid);
+    }
+
+    test('el motivo es obligatorio', () async {
+      final (id, _) = await paidInvoice();
+      expect(() => repo.voidInvoice(id, ' a '), throwsA(isA<PaymentException>()));
+    });
+
+    test('anular un pago ya cobrado: queda en el historial y el saldo sube', () async {
+      final (id, _) = await paidInvoice();
+      expect((await repo.get(id))!.paid, isTrue);
+      final payment = (await repo.get(id))!.payments.last;
+      await repo.voidPayment(id, payment.id!, 'Transferencia devuelta');
+      final inv = (await repo.get(id))!;
+      expect(inv.paid, isFalse);
+      expect(inv.balance, 59);
+      expect(inv.payments.last.isVoided, isTrue);
+      expect(inv.payments.last.voidReason, 'Transferencia devuelta');
+      final op = (await queue()).single;
+      expect(op.type, 'payment_void');
+      expect(op.data['reason'], 'Transferencia devuelta');
+    });
+
+    test('anular la factura anula todos sus pagos', () async {
+      final (id, uuid) = await paidInvoice();
+      await repo.voidInvoice(id, 'El cliente canceló');
+      final inv = (await repo.get(id))!;
+      expect(inv.isVoided, isTrue);
+      expect(inv.paid, isFalse);
+      expect(inv.payments.every((p) => p.isVoided), isTrue);
+      expect(inv.payments.first.voidReason, contains('El cliente canceló'));
+      final op = (await queue()).single;
+      expect(op.type, 'invoice_void');
+      expect(op.entityUuid, uuid);
+    });
+
+    test('un pago que aún no se envió se quita en vez de anularse', () async {
+      final id = await repo.create(sample());
+      final pid = await repo.addPayment(id, Payment(amount: 10, date: DateTime(2026, 10, 2)));
+      await repo.voidPayment(id, pid, 'Error al registrarlo');
+      expect((await repo.get(id))!.payments, isEmpty);
+      expect((await queue()).map((o) => o.type), ['invoice_upsert']);
+    });
+
+    test('una anulación que llega del servidor se aplica', () async {
+      final (id, uuid) = await paidInvoice();
+      final db = await helper.database;
+      await InvoiceRepository.applyServerInvoice(db, {
+        ..._serverInvoice(uuid, 'F-0001'),
+        'voided': true,
+        'voided_at': '2026-10-24 10:30:00',
+        'void_reason': 'Duplicada',
+      });
+      final inv = (await repo.get(id))!;
+      expect(inv.isVoided, isTrue);
+      expect(inv.voidReason, 'Duplicada');
+      expect(inv.voidedAt, DateTime(2026, 10, 24, 10, 30));
+    });
+  });
 }
 
 Map<String, Object?> _serverInvoice(String uuid, String number) => {

@@ -25,7 +25,7 @@ class DatabaseHelper {
   final String? path;
   final String fileName;
 
-  static const version = 4;
+  static const version = 5;
 
   Database? _db;
 
@@ -76,6 +76,7 @@ class DatabaseHelper {
     await _createPayments(db);
     await _addPaymentSyncColumns(db);
     await _createOutbox(db);
+    await _addVoidColumns(db);
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -116,6 +117,17 @@ class DatabaseHelper {
       await _createOutbox(db);
       // El login local se sustituye por el del servidor.
       await db.execute('DROP TABLE IF EXISTS users');
+    }
+    if (oldVersion < 5) {
+      await _addVoidColumns(db);
+    }
+  }
+
+  /// Anulación de facturas y pagos (se conservan con el motivo).
+  Future<void> _addVoidColumns(Database db) async {
+    for (final table in ['invoices', 'payments']) {
+      await db.execute('ALTER TABLE $table ADD COLUMN voided_at TEXT');
+      await db.execute('ALTER TABLE $table ADD COLUMN void_reason TEXT');
     }
   }
 
