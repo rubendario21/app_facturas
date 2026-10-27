@@ -8,6 +8,7 @@ import '../services/auth_service.dart';
 import '../services/sync_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/format.dart';
+import '../utils/search.dart';
 import '../widgets/status_chip.dart';
 import '../widgets/sync_button.dart';
 import 'business_picker_screen.dart';
@@ -34,6 +35,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Issuer _issuer = const Issuer();
   _Filter _filter = _Filter.all;
 
+  /// Texto del buscador (cliente o número de factura).
+  final _search = TextEditingController();
+
   AuthService get _auth => AuthService.instance;
   SyncService get _sync => SyncService.instance;
 
@@ -50,6 +54,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _search.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _sync.dataVersion.removeListener(_reload);
     _sync.removeListener(_onSyncChanged);
@@ -133,7 +138,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _open(InvoiceFormScreen(issuer: _issuer));
   }
 
-  bool _matches(Invoice i) => switch (_filter) {
+  bool _matches(Invoice i) =>
+      matchesInvoiceSearch(i, _search.text) &&
+      switch (_filter) {
         _Filter.all => true,
         _Filter.pending => i.isOpen,
         _Filter.overdue => i.isOverdue,
@@ -221,6 +228,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           ],
                           _Summary(invoices: all, currency: _issuer.currency),
                           const SizedBox(height: 16),
+                          // Un solo campo: busca por cliente o por número de factura.
+                          TextField(
+                            controller: _search,
+                            onChanged: (_) => setState(() {}),
+                            textInputAction: TextInputAction.search,
+                            decoration: InputDecoration(
+                              hintText: 'Buscar por cliente o número de factura',
+                              prefixIcon: const Icon(Icons.search),
+                              suffixIcon: _search.text.isEmpty
+                                  ? null
+                                  : IconButton(
+                                      tooltip: 'Borrar búsqueda',
+                                      icon: const Icon(Icons.close),
+                                      onPressed: () => setState(_search.clear),
+                                    ),
+                              isDense: true,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
                           SingleChildScrollView(
                             scrollDirection: Axis.horizontal,
                             child: SegmentedButton<_Filter>(
@@ -256,7 +282,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       hasScrollBody: false,
                       child: _EmptyState(
                         filtered: all.isNotEmpty,
+                        query: _search.text.trim(),
                         onCreate: _newInvoice,
+                        onClearSearch: () => setState(_search.clear),
                       ),
                     )
                   else
@@ -470,10 +498,19 @@ class _IssuerNotice extends StatelessWidget {
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.filtered, required this.onCreate});
+  const _EmptyState({
+    required this.filtered,
+    required this.onCreate,
+    this.query = '',
+    this.onClearSearch,
+  });
 
   final bool filtered;
   final VoidCallback onCreate;
+
+  /// Texto buscado; si no hay resultados se ofrece borrarlo.
+  final String query;
+  final VoidCallback? onClearSearch;
 
   @override
   Widget build(BuildContext context) {
@@ -491,20 +528,32 @@ class _EmptyState extends StatelessWidget {
               color: AppColors.of(context).muted),
           const SizedBox(height: 12),
           Text(
-              filtered
-                  ? 'Ninguna factura en este filtro'
-                  : 'Aún no hay facturas',
+              query.isNotEmpty
+                  ? 'Ninguna factura coincide con «$query»'
+                  : filtered
+                      ? 'Ninguna factura en este filtro'
+                      : 'Aún no hay facturas',
+              textAlign: TextAlign.center,
               style: theme.textTheme.titleMedium),
           const SizedBox(height: 4),
           Text(
-            filtered
-                ? 'Prueba con otro filtro para ver el resto.'
-                : 'Crea la primera; se compartirá con todo el equipo al sincronizar.',
+            query.isNotEmpty
+                ? 'Busca por el nombre del cliente o por el número (por ejemplo, 7 o F-0007). '
+                    'Revisa también el filtro seleccionado.'
+                : filtered
+                    ? 'Prueba con otro filtro para ver el resto.'
+                    : 'Crea la primera; se compartirá con todo el equipo al sincronizar.',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyMedium
                 ?.copyWith(color: AppColors.of(context).muted),
           ),
-          if (!filtered) ...[
+          if (query.isNotEmpty && onClearSearch != null) ...[
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+                onPressed: onClearSearch,
+                icon: const Icon(Icons.close),
+                label: const Text('Borrar búsqueda')),
+          ] else if (!filtered) ...[
             const SizedBox(height: 16),
             FilledButton.icon(
                 onPressed: onCreate,

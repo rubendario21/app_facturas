@@ -1,7 +1,7 @@
 name: facturas_app
-description: App de facturaciÃ³n para Android (facturas, PDF, control de pagos).
+description: App de facturación para Android (facturas, PDF, control de pagos).
 publish_to: 'none'
-version: 1.2.0+5000
+version: 1.3.0+5001
 
 environment:
   sdk: ^3.5.0
