@@ -17,6 +17,9 @@ class AppUser {
   /// Puede usar también el portal web en el negocio actual.
   final bool webAccess;
 
+  /// Puede anular facturas y pagos en el negocio actual.
+  final bool canVoid;
+
   const AppUser({
     required this.id,
     required this.name,
@@ -25,6 +28,7 @@ class AppUser {
     this.active = true,
     this.isSuperadmin = false,
     this.webAccess = false,
+    this.canVoid = false,
   });
 
   bool get isAdmin => role == 'admin';
@@ -37,6 +41,8 @@ class AppUser {
         active: j['active'] as bool? ?? true,
         isSuperadmin: j['is_superadmin'] as bool? ?? false,
         webAccess: j['web_access'] as bool? ?? false,
+        // Sesiones guardadas antes de existir el permiso: solo los administradores.
+        canVoid: j['can_void'] as bool? ?? j['role'] == 'admin',
       );
 
   Map<String, Object?> toJson() => {
@@ -47,6 +53,7 @@ class AppUser {
         'active': active,
         'is_superadmin': isSuperadmin,
         'web_access': webAccess,
+        'can_void': canVoid,
       };
 }
 
@@ -121,12 +128,12 @@ class Session {
     );
   }
 
-  Session copyWith({int? cursor}) => Session(
+  Session copyWith({int? cursor, AppUser? user}) => Session(
         serverUrl: serverUrl,
         accessToken: accessToken,
         refreshToken: refreshToken,
         accessExpiresAt: accessExpiresAt,
-        user: user,
+        user: user ?? this.user,
         businessId: businessId,
         businessName: businessName,
         businesses: businesses,

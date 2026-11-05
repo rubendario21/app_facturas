@@ -27,6 +27,7 @@ class AuthService extends ChangeNotifier {
   Session? get session => _session;
   bool get isLoggedIn => _session != null;
   bool get isAdmin => _session?.user.isAdmin ?? false;
+  bool get canVoid => _session?.user.canVoid ?? false;
 
   DatabaseHelper? _db;
 
@@ -153,6 +154,21 @@ class AuthService extends ChangeNotifier {
     if (id != s.businessId) return;
     _session = s.copyWith(cursor: cursor);
     await store.save(_session!);
+  }
+
+  /// Aplica el rol y los permisos que envía el servidor al sincronizar, para
+  /// que un cambio se note sin volver a entrar. Se ignora si mientras tanto se
+  /// cambió de negocio, porque son los de [businessId].
+  Future<void> updateUser(Map<String, Object?> json, {required int businessId}) async {
+    final s = _session;
+    if (s == null || s.businessId != businessId) return;
+    final user = AppUser.fromJson(json);
+    final changed = user.role != s.user.role ||
+        user.canVoid != s.user.canVoid ||
+        user.webAccess != s.user.webAccess;
+    _session = s.copyWith(user: user);
+    await store.save(_session!);
+    if (changed) notifyListeners();
   }
 
   /// Petición autenticada; renueva la sesión si ha caducado.

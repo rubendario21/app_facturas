@@ -197,6 +197,9 @@ class SyncService extends ChangeNotifier {
     });
 
     await auth.updateCursor((response['cursor'] as num).toInt(), businessId: businessId);
+    if (response['user'] is Map) {
+      await auth.updateUser((response['user'] as Map).cast<String, Object?>(), businessId: businessId);
+    }
     if (changed) dataVersion.value++;
     return ops.length == _batchSize;
   }

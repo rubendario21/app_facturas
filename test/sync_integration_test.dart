@@ -207,6 +207,24 @@ void main() {
     expect(afterInvoiceVoid.payments.every((p) => p.isVoided), isTrue);
     expect(afterInvoiceVoid.payments.last.voidReason, 'Cheque devuelto', reason: 'el ya anulado conserva su motivo');
 
+    // --- Permiso para anular: B lo recibe al sincronizar, sin volver a entrar.
+    final anaId = b.auth.session!.user.id;
+    expect(a.auth.canVoid, isTrue);
+    expect(b.auth.canVoid, isFalse);
+    await a.auth.request('PATCH', '/users/$anaId', body: {'can_void': true});
+    await b.sync.sync();
+    expect(b.auth.canVoid, isTrue);
+    final byMember = await b.invoices.create(draft('Cliente a anular', 10));
+    await b.sync.sync();
+    await b.invoices.voidInvoice(byMember, 'Se facturó por error');
+    await b.sync.sync();
+    expect(b.sync.takeRejections(), isEmpty);
+    expect((await b.invoices.get(byMember))!.isVoided, isTrue);
+    await a.auth.request('PATCH', '/users/$anaId', body: {'can_void': false});
+    await b.sync.sync();
+    expect(b.auth.canVoid, isFalse);
+    await a.sync.sync();
+
     // --- Varios negocios: el superadmin crea otro y cambia entre ellos.
     final mainId = a.auth.session!.businessId;
     final mainInvoices = (await a.invoices.list()).map((i) => i.number).toSet();

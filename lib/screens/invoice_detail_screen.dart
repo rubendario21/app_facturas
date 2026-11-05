@@ -306,7 +306,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                 tooltip: 'Eliminar borrador',
                 icon: const Icon(Icons.delete_outline),
                 onPressed: _delete),
-          if (!inv.isDraft && !inv.isVoided && AuthService.instance.isAdmin)
+          if (!inv.isDraft && !inv.isVoided && AuthService.instance.canVoid)
             PopupMenuButton<String>(
               onSelected: (_) => _voidInvoice(),
               itemBuilder: (_) => [
@@ -371,7 +371,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                             ? 'Pagada el ${inv.paidDate != null ? fmtDate(inv.paidDate!) : '-'}. '
                                 'Las facturas con pagos no se pueden editar.'
                             : 'Tiene abonos registrados, por eso no se puede editar.') +
-                        (AuthService.instance.isAdmin
+                        (AuthService.instance.canVoid
                             ? ' Si hay un error, anula el pago o la factura indicando el motivo.'
                             : ''),
                     style: theme.textTheme.bodySmall,
@@ -543,14 +543,14 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                   onPressed: () => _openReceipt(p),
                 ),
                 // Un pago aún no enviado lo puede quitar cualquiera; uno ya
-                // registrado en el servidor solo lo anula un administrador.
+                // registrado en el servidor solo lo anula quien tenga permiso.
                 if (p.isPending && !p.isVoided)
                   IconButton(
                     tooltip: 'Quitar pago',
                     icon: const Icon(Icons.delete_outline, size: 20),
                     onPressed: () => _removePendingPayment(p),
                   )
-                else if (AuthService.instance.isAdmin && !p.isVoided && !inv.isVoided)
+                else if (AuthService.instance.canVoid && !p.isVoided && !inv.isVoided)
                   IconButton(
                     tooltip: 'Anular pago',
                     icon: Icon(Icons.block, size: 20, color: theme.colorScheme.error),
